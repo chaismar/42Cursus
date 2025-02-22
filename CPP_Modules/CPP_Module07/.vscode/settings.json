@@ -1,0 +1,6 @@
+{
+	"files.associations": {
+		"*.tpp": "c",
+		"iostream": "cpp"
+	}
+}
