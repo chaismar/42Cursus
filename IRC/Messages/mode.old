@@ -1,0 +1,152 @@
+#include "../header.hpp"
+#include "../Server.hpp"
+#include "../Channel.hpp"
+
+void Server::mode(const ParsedMessage& msg, Client& cli) {
+    // Ignore le MODE +b de IRSSI
+    if ((msg.params.size() > 1 && msg.params[1].find('b') != std::string::npos)) {
+        return;
+	}
+	
+	if ((msg.params[0]) == cli.get_nickname()) {
+		return;
+	}
+
+    if (msg.params.empty()) {
+        send_messages(cli.get_socket_client(), ERR_NEEDMOREPARAMS("MODE"));
+        return;
+    }
+
+    std::string target = msg.params[0];
+    std::string modestring = msg.params.size() > 1 ? msg.params[1] : "";
+
+    // Si modestring ne commence pas par + ou -, considérer que c'est une requête pour obtenir le mode actuel
+    if (modestring.empty() || (modestring[0] != '+' && modestring[0] != '-')) {
+        Channel* target_channel = findChannel(target);
+        if (!target_channel) {
+            send_messages(cli.get_socket_client(), ERR_NOSUCHCHANNEL(cli.get_nickname(), target));
+            return;
+        }
+        send_messages(cli.get_socket_client(), RPL_CHANNELMODEIS(cli.get_nickname(), target, target_channel->getModeString()));
+        return;
+    }
+
+    Channel* target_channel = findChannel(target);
+    if (!target_channel) {
+        send_messages(cli.get_socket_client(), ERR_NOSUCHCHANNEL(cli.get_nickname(), target));
+        return;
+    }
+
+    // Vérifier que le client a les privilèges nécessaires pour modifier les modes
+    if (!target_channel->isOperator(cli.get_socket_client())) {
+        send_messages(cli.get_socket_client(), ERR_CHANOPRIVSNEEDED(cli.get_nickname(), target));
+        return;
+    }
+
+    // Ensemble des modes valides
+    const std::string valid_modes = "itkol";
+    std::string new_modestring;
+    std::vector<std::string> used_arguments;
+    std::vector<std::string> mode_arguments(msg.params.begin() + 2, msg.params.end());
+    std::vector<std::string>::iterator arg_it = mode_arguments.begin();
+    bool adding = true; // Indique si l'on ajoute ou enlève un mode
+    std::vector<char> unknown_modes;
+
+    for (size_t i = 0; i < modestring.size(); ++i) {
+        char mode = modestring[i];
+        if (mode == '+') {
+            adding = true;
+            // Ne pas ajouter le signe '+' immédiatement pour éviter les doublons
+        } else if (mode == '-') {
+            adding = false;
+            // Idem pour le signe '-'
+        } else if (valid_modes.find(mode) != std::string::npos) {
+            // Modes valides
+            bool mode_applied = false;
+            if (mode == 'i') {
+                target_channel->setInviteOnly(adding);
+                mode_applied = true;
+            } else if (mode == 't') {
+                target_channel->setTopicRestricted(adding);
+                mode_applied = true;
+            } else if (mode == 'k') {
+                if (adding) {
+                    if (arg_it != mode_arguments.end()) {
+                        target_channel->setKey(*arg_it);
+                        used_arguments.push_back(*arg_it);
+                        ++arg_it;
+                        mode_applied = true;
+                    }
+                } else {
+                    target_channel->clearKey();
+                    mode_applied = true;
+                }
+            } else if (mode == 'o') {
+                if (arg_it != mode_arguments.end()) {
+                    Client* target_client = findClient(*arg_it);
+                    if (!target_client || !target_channel->isClientInChannel(target_client->get_socket_client())) {
+                        send_messages(cli.get_socket_client(), ERR_USERNOTINCHANNEL(cli.get_nickname(), target));
+                    } else {
+                        if (adding) {
+                            target_channel->addOperator(target_client->get_socket_client());
+                        } else {
+                            target_channel->removeOperator(target_client->get_socket_client());
+                        }
+                        used_arguments.push_back(*arg_it);
+                        mode_applied = true;
+                    }
+                    ++arg_it;
+                }
+            } else if (mode == 'l') {
+                if (adding) {
+                    if (arg_it != mode_arguments.end()) {
+                        int limit = std::atoi(arg_it->c_str());
+                        if (limit > 0) {
+                            target_channel->setClientLimit(limit);
+                            used_arguments.push_back(*arg_it);
+                            mode_applied = true;
+                        }
+                        // Si le paramètre n'est pas valide, ignorer le mode 'l'
+                        ++arg_it;
+                    }
+                } else {
+                    target_channel->setClientLimit(0);
+                    mode_applied = true;
+                }
+            }
+            // Si le mode a été appliqué, ajouter le signe correspondant et le mode à new_modestring
+            if (mode_applied) {
+                // Ajouter le signe '+' ou '-' si nécessaire
+                if (new_modestring.empty() || new_modestring[new_modestring.size() - 1] != (adding ? '+' : '-')) {
+                    new_modestring += (adding ? '+' : '-');
+                }
+                new_modestring += mode;
+            }
+        } else {
+            // Mode inconnu
+            unknown_modes.push_back(mode);
+        }
+    }
+
+    // Afficher les modes inconnus
+    for (size_t i = 0; i < unknown_modes.size(); ++i) {
+        send_messages(cli.get_socket_client(), "unknown mode character " + std::string(1, unknown_modes[i]) + "\r\n");
+    }
+    // Vérifier si new_modestring contient des modes valides (hors '+' et '-')
+    bool has_modes = false;
+    for (size_t i = 0; i < new_modestring.size(); ++i) {
+        if (new_modestring[i] != '+' && new_modestring[i] != '-') {
+            has_modes = true;
+            break;
+        }
+    }
+    // Informer tous les clients du canal des modifications de mode si des modes valides ont été fournis
+    if (has_modes) {
+        std::string mode_message = ":" + cli.get_nickmask() + " MODE " + target + " " + new_modestring;
+        for (size_t i = 0; i < used_arguments.size(); ++i) {
+            mode_message += " " + used_arguments[i];
+        }
+        mode_message += "\r\n";
+        send_messages(target_channel->getClients(), mode_message);
+    }
+}
