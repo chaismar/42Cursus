@@ -79,5 +79,5 @@ int main(void)
 - **Modularité** : Réorganiser les définitions et les déclarations pour améliorer la modularité et la réutilisabilité du code.
 - **Compatibilité** : Assurer que le fichier d'en-tête est compatible avec différents compilateurs et environnements en utilisant des directives de préprocesseur appropriées.
 
-## commentaires
+## Commentaires
 ![GNL Project](Images/corrections.png)
