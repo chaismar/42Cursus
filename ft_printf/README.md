@@ -21,6 +21,7 @@ int	ft_printf(char	*str, ...);
 - Conversion de différents types de données en chaînes de caractères.
 - Gestion des erreurs et des cas limites.
 - Lecture et compréhension de la documentation technique.
+- Premiere utilisation d'un Makefile dans le cadre de 42
 
 ## Fonctionnalités à implémenter
 
